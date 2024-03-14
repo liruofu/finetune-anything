@@ -1,5 +1,6 @@
 import os
 from PIL import Image
+from skimage import io
 from torch.utils.data import Dataset
 from torchvision.datasets import VOCSegmentation, VisionDataset
 import numpy as np
@@ -45,8 +46,8 @@ class BaseSemanticDataset(VisionDataset):
                                                   target_transform=target_transform)
 
         self.class_names = metainfo['class_names']
-        self.img_path = os.path.join(dataset_dir, data_prefix['img_path'], image_set)
-        self.ann_path = os.path.join(dataset_dir, data_prefix['ann_path'], image_set)
+        self.img_path = os.path.join(dataset_dir, image_set, data_prefix['img_path'])
+        self.ann_path = os.path.join(dataset_dir, image_set, data_prefix['ann_path'])
         print('img_folder_name: {img_folder_name}, ann_folder_name: {ann_folder_name}'.format(
             img_folder_name=self.img_path, ann_folder_name=self.ann_path))
         self.img_names = [img_name.split(img_suffix)[0] for img_name in os.listdir(self.img_path) if
@@ -147,3 +148,39 @@ class TorchVOCSegmentation(VOCSegmentation):
 
         target = np.array(target)
         return img, target
+
+class CloudDetection(Dataset):
+    def __init__(self, root_dir, split="train", transform=None, target_transform=None):
+        """
+        Custom dataset for semantic segmentation.
+        Args:
+            root_dir (str): Directory with all the images and labels.
+            split (str): One of "train" or "test" to specify the split.
+            transform (callable, optional): Optional transform to be applied on a sample.
+        """
+        self.root_dir = root_dir
+        self.split = split
+        self.transform = transform
+        self.target_transform = target_transform
+        self.class_names = ['cloud']
+        self.images_dir = os.path.join(root_dir, split, "image")
+        self.labels_dir = os.path.join(root_dir, split, "label")
+        self.images = sorted(os.listdir(self.images_dir))
+
+    def __len__(self):
+        return len(self.images)
+
+
+    def __getitem__(self, idx):
+        img_name = os.path.join(self.images_dir, self.images[idx])
+        label_name = os.path.join(self.labels_dir, self.images[idx])
+
+        image = Image.open(img_name).convert('RGB')
+        label = Image.open(label_name)
+
+        if self.transform:
+            image= self.transform(image)
+        if self.target_transform:
+            label= self.target_transform(label)
+            
+        return image, np.array(label)

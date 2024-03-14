@@ -29,7 +29,7 @@ class BaseMaskDecoderAdapter(MaskDecoder):
         if fix:
             fix_params(self.sam_mask_decoder)  # move to runner to implement
 
-    def forward(self, image_embeddings, prompt_adapter, sparse_embeddings, dense_embeddings, multimask_output=True):
+    def forward(self, image_embeddings, prompt_adapter, sparse_embeddings, dense_embeddings, details, multimask_output=True):
         low_res_masks, iou_predictions = self.sam_mask_decoder(image_embeddings=image_embeddings,
                                                                    image_pe=prompt_adapter.sam_prompt_encoder.get_dense_pe(),
                                                                    sparse_prompt_embeddings=sparse_embeddings,
@@ -53,14 +53,14 @@ class SemMaskDecoderAdapter(BaseMaskDecoderAdapter):
         self.pair_params(self.decoder_neck)
         self.pair_params(self.decoder_head)
 
-    def forward(self, image_embeddings, prompt_adapter, sparse_embeddings, dense_embeddings, multimask_output=True,
+    def forward(self, image_embeddings, prompt_adapter, sparse_embeddings, dense_embeddings, details, multimask_output=True,
                 scale=1):
         src, iou_token_out, mask_tokens_out, src_shape = self.decoder_neck(image_embeddings=image_embeddings,
                                                                            image_pe=prompt_adapter.sam_prompt_encoder.get_dense_pe(),
                                                                            sparse_prompt_embeddings=sparse_embeddings,
                                                                            dense_prompt_embeddings=dense_embeddings,
                                                                            multimask_output=multimask_output, )
-        masks, iou_pred = self.decoder_head(src, iou_token_out, mask_tokens_out, src_shape, mask_scale=scale)
+        masks, iou_pred = self.decoder_head(src, iou_token_out, mask_tokens_out, src_shape, details,mask_scale=scale)
         return masks, iou_pred
 
     def pair_params(self, target_model: nn.Module):

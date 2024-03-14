@@ -11,6 +11,7 @@ from .build_sam import (
     build_sam_vit_h,
     build_sam_vit_l,
     build_sam_vit_b,
+    build_sam_vit_t_encoder,
     sam_model_registry,
 )
 from .modeling.sam import Sam

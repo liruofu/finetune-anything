@@ -6,12 +6,40 @@
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 from torch import nn
-
 from typing import Any, Optional, Tuple, Type
+from .common import LayerNorm2d, MLPBlock
 
-from .common import LayerNorm2d
 
+class MaskEmbeddingModule(nn.Module):
+    def __init__(self, token_size, embed_dim, ntokens):
+        super(MaskEmbeddingModule, self).__init__()
+        self.token_size = token_size
+        self.embed_dim = embed_dim
+
+        # 定义位置嵌入
+        self.position_embedding = nn.Embedding(ntokens, embed_dim)
+        self.conv = nn.Conv2d(1, embed_dim, token_size, token_size)
+        # 定义Transformer模型
+        self.transformer = MLPBlock(embed_dim, embed_dim*2)
+
+
+        # 初始化位置标记
+        self.register_buffer("position_ids", torch.arange(ntokens).expand((1, -1)))
+
+    def forward(self, mask):
+        b, _, h, w = mask.size() # b * n * (token_size^2)
+        position_embeddings = self.position_embedding(self.position_ids)  # 1 * ntokens * embed_dim
+        position_embeddings = position_embeddings.repeat(b, 1, 1)  # b * ntokens * embed_dim
+        mask = self.conv(mask)
+        mask = mask.permute(0, 2, 3, 1).view(b, -1, self.embed_dim)
+        mask_embeddings = mask + position_embeddings
+
+        # 使用Transformer
+        output_embeddings = self.transformer(mask_embeddings)
+
+        return output_embeddings
 
 class PromptEncoder(nn.Module):
     def __init__(
@@ -46,8 +74,9 @@ class PromptEncoder(nn.Module):
         point_embeddings = [nn.Embedding(1, embed_dim) for i in range(self.num_point_embeddings)]
         self.point_embeddings = nn.ModuleList(point_embeddings)
         self.not_a_point_embed = nn.Embedding(1, embed_dim)
-
+        self.mask_sparse = MaskEmbeddingModule(32, embed_dim, 64)
         self.mask_input_size = (4 * image_embedding_size[0], 4 * image_embedding_size[1])
+        # print(self.mask_input_size)
         self.mask_downscaling = nn.Sequential(
             nn.Conv2d(1, mask_in_chans // 4, kernel_size=2, stride=2),
             LayerNorm2d(mask_in_chans // 4),
@@ -99,10 +128,12 @@ class PromptEncoder(nn.Module):
         corner_embedding[:, 1, :] += self.point_embeddings[3].weight
         return corner_embedding
 
-    def _embed_masks(self, masks: torch.Tensor) -> torch.Tensor:
+    def _embed_masks(self, masks: torch.Tensor):
         """Embeds mask inputs."""
+        masks = F.interpolate(masks, self.mask_input_size)
+        mask_sparse = self.mask_sparse(masks)
         mask_embedding = self.mask_downscaling(masks)
-        return mask_embedding
+        return mask_embedding, mask_sparse
 
     def _get_batch_size(
         self,
@@ -159,7 +190,8 @@ class PromptEncoder(nn.Module):
             sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=1)
 
         if masks is not None:
-            dense_embeddings = self._embed_masks(masks)
+            dense_embeddings, sparse = self._embed_masks(masks)
+            sparse_embeddings = torch.cat([sparse_embeddings, sparse], dim=1)
         else:
             dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 bs, -1, self.image_embedding_size[0], self.image_embedding_size[1]

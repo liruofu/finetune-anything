@@ -1,0 +1,101 @@
+train:
+  experiment_name: 'semantic_sam'
+
+  # Model
+  model:
+    sam_name: 'sem_sam'
+    params:
+      # Fix the a part of parameters in SAM
+      fix_img_en: True
+      fix_prompt_en: Flase
+      fix_mask_de: False
+      ckpt_path: 'sam_ckpt/tiny_vit_5m_22kto1k_distill.pth'
+      class_num: 2 # 20 + 1
+      model_type: 'tiny_vit'    # type should be in [vit_h, vit_b, vit_l, default]
+
+  # Dataset
+  dataset:
+    name: 'cloud'
+    params:
+      root_dir: 'D:\\Datasets\\GF1_WHU dataset\\512'
+      split: 'train'
+    transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+      to_tensor:
+        params: ~
+    target_transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+
+  # Losses
+  losses:
+    ce:
+      weight: 1.0
+      params:  # ~ means None type, the initial params of loss could be identified here
+        ignore_index: 255
+      label_one_hot: False
+#    focal:
+#      weight: 1.0
+#      params: # ~ means None type, the initial params of loss could be identified here
+#        gamma: 1
+#      label_one_hot: False
+    # dice:
+    #   weight: 1.0
+    #   params: # ~ means None type, the initial params of loss could be identified here
+    #     ~
+    #   label_one_hot: False
+
+  # Optimizer
+  opt_params:
+    lr_default:  5e-5
+    lr_list: [5e-5]
+    wd_list: [0.01]
+    wd_default: 0.01
+    group_keys: [ [ 'mask_adapter.decoder_head.output_hypernetworks_mlps', ], ]
+  opt_name: 'adam' # 'sgd'
+  scheduler_name: 'cosine'
+
+  # Runner
+#  max_iter: 260150
+  max_epoch: 50
+  log_iter: 20
+  eval_iter: 5000
+  runner_name: 'sem_runner'
+  # Dataloader
+  bs: 16 # 8
+  num_workers: 8
+  drop_last: False
+  # Logger
+  use_tensorboard: True
+  tensorboard_folder: './experiment/tensorboard'
+  log_folder: './experiment/log'
+  model_folder: './experiment/model'
+
+val:
+  dataset:
+    name: 'cloud'
+    params:
+      root_dir: 'D:\\Datasets\\GF1_WHU dataset\\512'
+      split: 'test'
+    transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+      to_tensor:
+        params: ~
+    target_transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+
+  bs: 16
+  num_workers: 8
+  drop_last: False
+
+
+test:
+  need_test: False
+

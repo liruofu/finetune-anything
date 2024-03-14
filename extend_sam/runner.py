@@ -5,6 +5,7 @@ import torch
 import cv2
 import torch.nn.functional as F
 import os
+import datetime
 import torch.nn as nn
 
 
@@ -42,7 +43,8 @@ class SemRunner(BaseRunner):
         train_iterator = Iterator(self.train_loader)
         best_valid_mIoU = -1
         model_path = "{cfg.model_folder}/{cfg.experiment_name}/model.pth".format(cfg=cfg)
-        log_path = "{cfg.log_folder}/{cfg.experiment_name}/log_file.txt".format(cfg=cfg)
+        current_time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = "{cfg.log_folder}/{cfg.experiment_name}/{}_log_file.txt".format(current_time_str, cfg=cfg)
         check_folder(model_path)
         check_folder(log_path)
         writer = None
@@ -51,12 +53,12 @@ class SemRunner(BaseRunner):
             from torch.utils.tensorboard import SummaryWriter
             writer = SummaryWriter(tensorboard_dir)
         # train
-        for iteration in range(cfg.max_iter):
+        max_iter = cfg.max_epoch * len(self.train_loader)
+        for iteration in range(max_iter):
             images, labels = train_iterator.get()
             images, labels = images.cuda(), labels.cuda().long()
             masks_pred, iou_pred = self.model(images)
-            masks_pred = F.interpolate(masks_pred, self.original_size, mode="bilinear", align_corners=False)
-
+            masks_pred = F.interpolate(masks_pred, self.original_size)
             total_loss = torch.zeros(1).cuda()
             loss_dict = {}
             self._compute_loss(total_loss, loss_dict, masks_pred, labels, cfg)
@@ -74,12 +76,12 @@ class SemRunner(BaseRunner):
                           writer=writer, timer=self.train_timer)
             # eval
             if (iteration + 1) % cfg.eval_iter == 0:
-                mIoU, _ = self._eval()
+                mIoU, oa = self._eval()
                 if best_valid_mIoU == -1 or best_valid_mIoU < mIoU:
                     best_valid_mIoU = mIoU
                     save_model(self.model, model_path, parallel=self.the_number_of_gpu > 1)
                     print_and_save_log("saved model in {model_path}".format(model_path=model_path), path=log_path)
-                log_data = {'mIoU': mIoU, 'best_valid_mIoU': best_valid_mIoU}
+                log_data = {'mIoU': mIoU, 'OA': oa, 'best_valid_mIoU': best_valid_mIoU}
                 write_log(iteration=iteration, log_path=log_path, log_data=log_data, status=self.exist_status[1],
                           writer=writer, timer=self.eval_timer)
         # final process
@@ -99,15 +101,10 @@ class SemRunner(BaseRunner):
             for index, (images, labels) in enumerate(self.val_loader):
                 images = images.cuda()
                 labels = labels.cuda()
-                masks_pred, iou_pred = self.model(images)
+                masks_pred, _, = self.model(images)
+                masks_pred = F.interpolate(masks_pred, self.original_size)
                 predictions = torch.argmax(masks_pred, dim=1)
-                for batch_index in range(images.size()[0]):
-                    pred_mask = get_numpy_from_tensor(predictions[batch_index])
-                    gt_mask = get_numpy_from_tensor(labels[batch_index].squeeze(0))
-                    h, w = pred_mask.shape
-                    gt_mask = cv2.resize(gt_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-
-                    eval_metric.add(pred_mask, gt_mask)
+                eval_metric.add(predictions.detach(), labels.detach())
         self.model.train()
         return eval_metric.get(clear=True)
 

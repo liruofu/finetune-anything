@@ -96,82 +96,51 @@ def print_and_save_log(message, path):
         f.write(message + '\n')
 
 
+class ConfusionMatrix(object):
+    def __init__(self, num_classes):
+        self.num_classes = num_classes
+        self.mat = None
+
+    def update(self, a, b):
+        n = self.num_classes
+        if self.mat is None:
+            self.mat = torch.zeros((n, n), dtype=torch.int64, device=a.device)
+        with torch.no_grad():
+            k = (a >= 0) & (a < n)
+            inds = n * a[k].to(torch.int64) + b[k].to(torch.int64)
+            self.mat += torch.bincount(inds, minlength=n ** 2).reshape(n, n)
+
+    def reset(self):
+        if self.mat is not None:
+            self.mat.zero_()
+
+    def compute(self):
+        h = self.mat.float()
+        inter = torch.diag(h)
+        union = torch.sum(h, dim=1) + torch.sum(h, dim=0) - torch.diag(h)
+        iou = inter / union
+        acc = torch.diag(h) / h.sum(1)
+        acc_global = torch.diag(h).sum() / h.sum()
+        return torch.mean(iou)*100, acc_global*100
+
+
 class mIoUOnline:
     def __init__(self, class_names):
         self.class_names = ['background'] + class_names
         self.class_num = len(self.class_names)
-
-        self.clear()
-
-    def get_data(self, pred_mask, gt_mask):
-        obj_mask = gt_mask < 255
-        correct_mask = (pred_mask == gt_mask) * obj_mask
-
-        P_list, T_list, TP_list = [], [], []
-        for i in range(self.class_num):
-            P_list.append(np.sum((pred_mask == i) * obj_mask))
-            T_list.append(np.sum((gt_mask == i) * obj_mask))
-            TP_list.append(np.sum((gt_mask == i) * correct_mask))
-
-        return (P_list, T_list, TP_list)
-
-    def add_using_data(self, data):
-        P_list, T_list, TP_list = data
-        for i in range(self.class_num):
-            self.P[i] += P_list[i]
-            self.T[i] += T_list[i]
-            self.TP[i] += TP_list[i]
+        self.m = ConfusionMatrix(self.class_num)
 
     def add(self, pred_mask, gt_mask):
-        obj_mask = gt_mask < 255
-        correct_mask = (pred_mask == gt_mask) * obj_mask
+        self.m.update(gt_mask.flatten(), pred_mask.flatten())
 
-        for i in range(self.class_num):
-            self.P[i] += np.sum((pred_mask == i) * obj_mask)
-            self.T[i] += np.sum((gt_mask == i) * obj_mask)
-            self.TP[i] += np.sum((gt_mask == i) * correct_mask)
-
-    def get(self, detail=False, clear=True):
-        IoU_dic = {}
-        IoU_list = []
-
-        FP_list = []  # over activation
-        FN_list = []  # under activation
-
-        for i in range(self.class_num):
-            IoU = self.TP[i] / (self.T[i] + self.P[i] - self.TP[i] + 1e-10) * 100
-            FP = (self.P[i] - self.TP[i]) / (self.T[i] + self.P[i] - self.TP[i] + 1e-10)
-            FN = (self.T[i] - self.TP[i]) / (self.T[i] + self.P[i] - self.TP[i] + 1e-10)
-
-            IoU_dic[self.class_names[i]] = IoU
-
-            IoU_list.append(IoU)
-            FP_list.append(FP)
-            FN_list.append(FN)
-
-        mIoU = np.mean(np.asarray(IoU_list))
-        mIoU_foreground = np.mean(np.asarray(IoU_list)[1:])
-
-        FP = np.mean(np.asarray(FP_list))
-        FN = np.mean(np.asarray(FN_list))
-
+    def get(self, clear=True):
+        miou, oa = self.m.compute()
         if clear:
             self.clear()
-
-        if detail:
-            return mIoU, mIoU_foreground, IoU_dic, FP, FN
-        else:
-            return mIoU, mIoU_foreground
+        return get_numpy_from_tensor(miou), get_numpy_from_tensor(oa)
 
     def clear(self):
-        self.TP = []
-        self.P = []
-        self.T = []
-
-        for _ in range(self.class_num):
-            self.TP.append(0)
-            self.P.append(0)
-            self.T.append(0)
+        self.m.reset()
 
 
 def get_numpy_from_tensor(tensor):
@@ -230,5 +199,5 @@ def one_hot_embedding_3d(labels, class_num=21):
     :return: B N H W
     '''
     one_hot_labels = labels.clone()
-    one_hot_labels[one_hot_labels == 255] = 0 # 0 is background
+    one_hot_labels[one_hot_labels == 255] = 0  # 0 is background
     return F.one_hot(one_hot_labels, num_classes=class_num).permute(0, 3, 1, 2).contiguous().float()

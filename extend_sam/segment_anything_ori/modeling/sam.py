@@ -18,12 +18,12 @@ from .prompt_encoder import PromptEncoder
 
 
 class Sam(nn.Module):
-    mask_threshold: float = 0.0
+    mask_threshold: float = 0.5
     image_format: str = "RGB"
 
     def __init__(
         self,
-        image_encoder: ImageEncoderViT,
+        image_encoder,
         prompt_encoder: PromptEncoder,
         mask_decoder: MaskDecoder,
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
@@ -51,6 +51,8 @@ class Sam(nn.Module):
     @property
     def device(self) -> Any:
         return self.pixel_mean.device
+
+
 
     def forward(
         self,
@@ -97,13 +99,14 @@ class Sam(nn.Module):
         """
         input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
         image_embeddings = self.image_encoder(input_images)
-
+        # dark_channel = torch.min(input_images, dim=1)
         outputs = []
         for image_record, curr_embedding in zip(batched_input, image_embeddings):
             if "point_coords" in image_record:
                 points = (image_record["point_coords"], image_record["point_labels"])
             else:
                 points = None
+            # points, rough_mask = self.generate_samples(dark_channel, 0.5, 1024)
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
                 points=points,
                 boxes=image_record.get("boxes", None),

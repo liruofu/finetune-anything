@@ -3,8 +3,46 @@ from torch import nn
 from torch.nn import functional as F
 
 from typing import List, Tuple, Type
-
 from .segment_anything_ori.modeling.common import LayerNorm2d
+
+def l2_norm(x):
+    return torch.einsum("bcn, bn->bcn", x, 1 / torch.norm(x, p=2, dim=-2))
+
+class SharedSpatialAttention(nn.Module):
+    """Position linear attention"""
+    def __init__( self, in_places, out_channel, eps=1e-6 ):
+        super().__init__() #初始化父类
+        self.in_places = in_places #输入 channel
+        self.l2_norm = l2_norm # L2范数
+        self.eps = eps #防 nan 参数
+        #QKV生成卷积
+        self.out = out_channel
+        self.query_conv = nn.Conv2d(in_places, out_channel // 4, 1)
+        self.key_conv = nn.Conv2d(in_channels=in_places, out_channels=out_channel // 4, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels=in_places, out_channels=out_channel, kernel_size=1)
+        self.l1 = nn.Sequential(nn.Conv2d(in_places, out_channel, 3,1,1),
+                                nn.BatchNorm2d(out_channel, momentum=0.1),nn.ReLU(inplace=True))
+        self.l2 = nn.Sequential(nn.Conv2d(in_places, out_channel, kernel_size=1),
+                                nn.BatchNorm2d(out_channel, momentum=0.1),nn.ReLU(inplace=True))
+        self.out_cov = nn.Sequential(nn.Conv2d(out_channel, out_channel, 1, 1),
+                                     nn.BatchNorm2d(out_channel), nn.ReLU(inplace=True))
+    def forward(self, x):
+        # Apply the feature map to the queries and keys
+        batch_size, _, width, height = x.shape
+        Q = self.query_conv(x).view(batch_size, -1, width * height)
+        K = self.key_conv(x).view(batch_size, -1, width * height)
+        V = self.value_conv(x).view(batch_size, -1, width * height)
+        Q = self.l2_norm(Q).permute(-3, -1, -2) #对Q进行L2正则
+        K = self.l2_norm(K) #对K进行L2正则
+        tailor_sum = 1 / (width * height + torch.einsum("bnc, bc->bn", Q, torch.sum(K, dim=-1) + self.eps)) #下方全部
+        value_sum = torch.einsum("bcn->bc", V).unsqueeze(-1)
+        value_sum = value_sum.expand(-1, self.out, width * height)
+        matrix = torch.einsum('bmn, bcn->bmc', K, V)
+        matrix_sum = value_sum + torch.einsum("bnm, bmc->bcn", Q, matrix) #上方全部
+        weight_value = torch.einsum("bcn, bn->bcn", matrix_sum, tailor_sum)
+        weight_value = weight_value.view(batch_size, self.out, height, width)+self.l1(x)+self.l2(x)
+        return self.out_cov(weight_value)
+
 
 
 class OriHead(nn.Module):
@@ -95,7 +133,7 @@ class OriHead(nn.Module):
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)
 
-        # Select the correct mask or masks for outptu
+        # Select the correct mask or masks for output
         if multimask_output:
             mask_slice = slice(1, None)
         else:
@@ -109,7 +147,7 @@ class OriHead(nn.Module):
 
 class SemSegHead(nn.Module):
 
-    def __init__(
+    def  __init__(
             self,
             *,
             transformer_dim: int,
@@ -147,7 +185,7 @@ class SemSegHead(nn.Module):
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
             activation(),
         )
-
+        self.fuse = SharedSpatialAttention(32, 32)
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
                 MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
@@ -165,6 +203,7 @@ class SemSegHead(nn.Module):
             iou_token_out: torch.Tensor,
             mask_tokens_out: torch.Tensor,
             src_shape,
+            details,
             mask_scale=1,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -186,7 +225,9 @@ class SemSegHead(nn.Module):
 
         # Upscale mask embeddings and predict masks using the mask tokens
         src = src.transpose(1, 2).view(b, c, h, w)
-        upscaled_embedding = self.output_upscaling(src)
+        upscaled_embedding = self.output_upscaling(src)+details
+        upscaled_embedding = self.fuse(upscaled_embedding)+upscaled_embedding
+        # print(upscaled_embedding.size())
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.class_num):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, mask_scale, :]))
@@ -197,7 +238,7 @@ class SemSegHead(nn.Module):
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)  # B N H W, N is num of category
-
+        # print(masks.size())
         return masks, iou_pred
 
 

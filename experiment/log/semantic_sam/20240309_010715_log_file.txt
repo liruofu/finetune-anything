@@ -1,0 +1,4 @@
+iteration : 19, ce : 0.6475176677107811, total_loss : 0.6475176677107811, time : 82
+iteration : 39, ce : 0.43241880238056185, total_loss : 0.43241880238056185, time : 38
+iteration : 59, ce : 0.40121258795261383, total_loss : 0.40121258795261383, time : 43
+iteration : 79, ce : 0.3514153093099594, total_loss : 0.3514153093099594, time : 46

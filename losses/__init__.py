@@ -1,8 +1,8 @@
 import torch.nn as nn
-from .losses import CustormLoss
+from .losses import CustormLoss, DiceLoss, FocalLoss
 
 AVAI_LOSS = {'ce': nn.CrossEntropyLoss, 'multi_label_soft_margin': nn.MultiLabelSoftMarginLoss,
-             'test_custom': CustormLoss, 'mse': nn.MSELoss}
+             'test_custom': CustormLoss, 'mse': nn.MSELoss, 'dice': DiceLoss, 'focal':FocalLoss}
 
 
 def get_losses(losses):

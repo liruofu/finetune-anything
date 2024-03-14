@@ -87,12 +87,15 @@ class MaskDecoderNeck(nn.Module):
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
 
         # Expand per-image data in batch direction to be per-mask
-        src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
-        src = src + dense_prompt_embeddings
-        pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
+        # print(image_embeddings.size(), dense_prompt_embeddings.size())
+        # src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        src = image_embeddings + dense_prompt_embeddings
+        # print(src.size(), dense_prompt_embeddings.size())
+        # pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
         src_shape = src.shape
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens)
+        # print(src.size(), pos_src.size(), tokens.size())
+        hs, src = self.transformer(src, image_pe, tokens)
         iou_token_out = hs[:, 0, :]
         mask_tokens_out = hs[:, 1: (1 + self.num_mask_tokens), :]
 

@@ -38,7 +38,7 @@ def get_scheduler(
         gamma=0.1,
         warmup_factor=0.01,
         warmup_steps=10,
-        max_epoch=1,
+        max_iteration=100,
         n_epochs_init=50,
         n_epochs_decay=50,
 
@@ -112,7 +112,7 @@ def get_scheduler(
 
     elif lr_scheduler == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, int(max_epoch)
+            optimizer, int(max_iteration)
         )
 
     elif lr_scheduler == "linear":
