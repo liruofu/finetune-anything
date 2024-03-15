@@ -1,0 +1,5 @@
+rclip_ckpt/RemoteCLIP-RN50.pt
+rclip_ckpt/RemoteCLIP-ViT-B-32.pt
+sam_ckpt/sam_vit_b_01ec64.pth
+sam_ckpt/tiny_vit_5m_22kto1k_distill.pth
+requirements.txt
